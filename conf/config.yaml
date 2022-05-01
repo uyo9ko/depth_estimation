@@ -1,0 +1,35 @@
+defaults:
+  - _self_
+trainer:
+  gpus: 1
+  trainer_path: /content/drive/Shareddrives/szh/pl_ckpt/
+  max_epochs: 80
+  auto_lr_find: False
+model:
+  lr: 1e-3 
+  loss_alphas:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  weight_decay: 0.0001
+  min_depth: 0
+  max_depth: 114
+  load_ckpt_paths:
+    - /content/drive/Shareddrives/szh/weights/mit_b4.pth
+    - /content/drive/Shareddrives/szh/weights/best_model_nyu.ckpt
+data:
+  data_name: SQUID
+  train_data_path: /content/drive/Shareddrives/szh/datasets/SQUID
+  predict_data_path: /content/drive/Shareddrives/szh/datasets/SQUID
+  fda_trans: False
+  numworkers: 2
+  batch_size: 8
+  scale_size:
+    - 896
+    - 1152
+logger:
+  proj_name: GLP_depth_decoder_finetune_contrast
+  version: test
+  wandb_savedir: /content/drive/Shareddrives/szh/wandb
+
