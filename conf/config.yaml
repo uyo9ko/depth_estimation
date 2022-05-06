@@ -1,0 +1,35 @@
+defaults:
+  - _self_
+trainer:
+  gpus: 1
+  trainer_path: /content/drive/Shareddrives/szh/pl_ckpt/
+  max_epochs: 20
+  auto_lr_find: False
+model:
+  lr: 1e-4 
+  loss_alphas:
+    - 1.0
+    - 0.0
+    - 1.0
+    - 0.0
+  weight_decay: 0.0001
+  min_depth: 1e-3
+  max_depth: 10
+  load_ckpt_paths:
+    - /content/drive/Shareddrives/szh/weights/mit_b4.pth
+    - /content/drive/Shareddrives/szh/weights/best_model_nyu.ckpt
+  save_png_path: /content/drive/Shareddrives/szh/prediction/dense_results
+data:
+  data_name: nyu2
+  train_data_path: /content/drive/Shareddrives/szh/datasets/nyuv2
+  predict_data_path: /content/drive/Shareddrives/szh/datasets/SQUID
+  fda_trans: True
+  numworkers: 2
+  batch_size: 4
+  scale_size:
+    - 448
+    - 576
+logger:
+  proj_name: Dense_depth_baseline
+  version: fda_blur_v6
+  wandb_savedir: /content/drive/Shareddrives/szh/wandb
