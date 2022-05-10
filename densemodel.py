@@ -10,7 +10,8 @@ from collections import OrderedDict
 import cv2
 import os
 import numpy as np
-
+from cov_settings import CovMatrix_ISW
+from instance_whitening import *
 
 class UpSample(nn.Sequential):
     def __init__(self, input_channel, output_channel):
@@ -55,23 +56,20 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
         self.original_model = models.densenet161(pretrained=True)
+        self.original_model.norm0 = InstanceWhitening(64)
+        self.w_arr = []
 
-    def forward(self, x):
+    def forward(self, x, isw=False):
         features = [x]
         for k, v in self.original_model.features._modules.items():
-            features.append(v(features[-1]))
+            if isw and (k == "norm0" or k == "denseblock1" or k == "denseblock2"):
+                out = v(features[-1])
+                out, w = InstanceWhitening(out.shape[1])(out)
+                self.w_arr.append(w)
+                features.append(out)
+            else:
+                features.append(v(features[-1]))
         return features  
-
-    
-class DenseDepth(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.encoder = Encoder()
-        self.decoder = Decoder()
-
-    def forward(self, x):  
-        x = self.encoder(x)
-        return self.decoder(x)
 
 
 class MyModel(LightningModule):
@@ -86,38 +84,68 @@ class MyModel(LightningModule):
         self.load_ckpt_paths = load_ckpt_paths
         self.save_png_path = save_png_path
         self.save_hyperparameters()
-        
+
+        #modules
+        self.encoder = Encoder()
+        self.decoder = Decoder()
         #loss functions
         self.l1_criterion = nn.L1Loss()
-        # self.SSIL = SSIL_Loss()
-        # self.ssim = StructuralSimilarityIndexMeasure(data_range=self.max_depth - self.min_depth)
-        # self.SiLog = SiLogLoss()
-        
-        self.model = DenseDepth()
 
-        # model_weight = torch.load(self.load_ckpt_paths[1])
-        # if 'module' in next(iter(model_weight.items()))[0]:
-        #     model_weight = OrderedDict((k[7:], v) for k, v in model_weight.items())
-        # self.model.load_state_dict(model_weight)
-        # print('load GLP model success from {}'.format(self.load_ckpt_paths[1]))
+        self.cov_matrix_layer = []
+        self.cov_type = []
+        for i in range(len(self.args.wt_layer)):
+            self.cov_matrix_layer.append(CovMatrix_ISW(dim=in_channel_list[i], 
+                                        relax_denom=self.args.relax_denom, 
+                                        clusters=self.args.clusters))
+
         
-    def forward(self, x):
-        x = self.model(x)
-        return x
+    def forward(self, x, isw=False):
+        if isw:
+            x = self.encoder(x, isw=True)
+            return self.decoder(x), self.encoder.w_arr
+        else:
+            x = self.encoder(x)
+            return self.decoder(x)
+        
     
-    def training_step(self, batch, batch_idx):
+    def training_step(self, epoch, batch, batch_idx):
         image, depth = batch
-        train_out = self(image)
+        if epoch < 5:
+            train_out= self(image)
+        else:
+            train_out, w_arr = self(image, isw=True)
+        
+        # calculate  wt_loss
+        wt_loss = torch.FloatTensor([0]).cuda()
+        for index, f_map in enumerate(w_arr):
+            # Instance Whitening
+            B, C, H, W = f_map.shape  # i-th feature size (B X C X H X W)
+            HW = H * W
+            f_map = f_map.contiguous().view(B, C, -1)  # B X C X H X W > B X C X (H X W)
+            eye, reverse_eye = self.cov_matrix_layer[index].get_eye_matrix()
+            f_cor = torch.bmm(f_map, f_map.transpose(1, 2)).div(HW - 1) + (self.eps * eye)  # B X C X C / HW
+            off_diag_elements = f_cor * reverse_eye
+            #print("here", off_diag_elements.shape)
+            self.cov_matrix_layer[index].set_variance_of_covariance(torch.var(off_diag_elements, dim=0))
+            eye, mask_matrix, margin, num_remove_cov = self.cov_matrix_layer[index].get_mask_matrix()
+            loss = instance_whitening_loss(f_map, eye, mask_matrix, margin, num_remove_cov)
+            wt_loss = wt_loss + loss
+        wt_loss = wt_loss / len(w_arr)
+
         train_loss_depth = self.alphas[0] * self.l1_criterion(train_out, depth) 
-        # train_SSIL_loss = self.alphas[1] * self.SSIL(train_out, depth) 
-        train_loss_ssim = self.alphas[2] * (1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) 
+        train_loss_ssim = self.alphas[1] * (1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) 
+        train_loss_wt = self.alphas[2] * wt_loss
         # train_Silog_loss = self.alphas[3] * self.SiLog(train_out.squeeze(), depth.squeeze()) 
         # train_loss_ssim = torch.clamp((1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) * 0.5, 0, 1)
 
-        train_loss =   train_loss_depth + train_loss_ssim
+        if epoch < 5:
+            train_loss =   train_loss_depth + train_loss_ssim
+        else:
+            train_loss =   train_loss_depth + train_loss_ssim + train_loss_wt
+            self.log('l_wt', train_loss_wt)
+
         self.log('l_d', train_loss_depth) 
         self.log('l_ssim', train_loss_ssim)
-        # self.log('l_ssil', train_SSIL_loss)
         self.log( 'l_t', train_loss)
         return train_loss
     
@@ -126,8 +154,7 @@ class MyModel(LightningModule):
         image, val_depth = batch
         val_out = self(image)
         val_loss_depth = self.alphas[0] * self.l1_criterion(val_out, val_depth) 
-        # val_SSIL_loss = self.alphas[1] * self.SSIL(val_out, val_depth)
-        val_loss_ssim = self.alphas[2] * (1 - ssim(val_out, val_depth, val_range=self.max_depth - self.min_depth)) 
+        val_loss_ssim = self.alphas[1] * (1 - ssim(val_out, val_depth, val_range=self.max_depth - self.min_depth)) 
         # val_Silog_loss = self.alphas[3] * self.SiLog(val_out.squeeze(), val_depth.squeeze())
         # val_loss_ssim = torch.clamp((1 - ssim(val_out, val_depth, val_range=self.max_depth - self.min_depth)) * 0.5, 0, 1)
         
@@ -145,21 +172,6 @@ class MyModel(LightningModule):
         y_hat = self(x)
         gt, pred = np_process_depth(y, y_hat, self.min_depth, self.max_depth)
         metrics = compute_errors(gt, pred)
-
-
-        ## visualization
-        y = y.cpu().numpy().squeeze()
-        y_hat = y_hat.cpu().numpy().squeeze()
-        norm_y_hat = cv2.normalize(y_hat, None, alpha = 0, beta = 255, norm_type = cv2.NORM_MINMAX, dtype = cv2.CV_32F) 
-        im_color = cv2.applyColorMap(norm_y_hat.astype(np.uint8), cv2.COLORMAP_JET) 
-        cv2.imwrite(os.path.join(self.save_path, 'pred/{}_.png'.format(batch_idx)), im_color)
-        norm_y = cv2.normalize(y, None, alpha = 0, beta = 255, norm_type = cv2.NORM_MINMAX, dtype = cv2.CV_32F) 
-        im_color = cv2.applyColorMap(norm_y.astype(np.uint8), cv2.COLORMAP_JET) 
-        cv2.imwrite(os.path.join(self.save_path, 'gt/{}.png'.format(batch_idx)), im_color) 
-        x = x.cpu().numpy().squeeze()*255
-        x = x.transpose(1,2,0)
-        x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
-        cv2.imwrite(os.path.join(self.save_path, 'img/{}.png'.format(batch_idx)), x)          
 
         return metrics
 
