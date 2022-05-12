@@ -15,6 +15,8 @@ from PIL import Image
 import random 
 
 
+
+
 def readTXT(self, txt_path):
     with open(txt_path, 'r') as f:
         listInTXT = [line.strip() for line in f]
@@ -23,10 +25,11 @@ def readTXT(self, txt_path):
 
 
 class Nyu2Dataset(Dataset):
-    def __init__(self, data_path: str, transform=None, istrain=True):
+    def __init__(self, data_path: str, transform=None, fda_transform=None, istrain=True):
         self.data_path = data_path
+        self.istrain = istrain
         
-        if istrain:
+        if self.istrain:
             self.txt_path = os.path.join(self.data_path, 'train_list.txt')
             self.image_path = os.path.join(self.data_path, 'sync')
             self.depth_path = os.path.join(self.data_path, 'sync')
@@ -37,6 +40,7 @@ class Nyu2Dataset(Dataset):
         self.filenames = readTXT(self, self.txt_path)
 
         self.transform = transform
+        self.fda_transform = fda_transform
 
     def __getitem__(self, idx: int) -> dict:
         filename = self.filenames[idx].split(' ')
@@ -47,13 +51,21 @@ class Nyu2Dataset(Dataset):
         depth = np.array(depth)
         depth = depth / 1000.0
         depth = depth[..., np.newaxis]
+
+        # get fda transform image
+        fda_image = self.fda_transform(image=image)['image']
+        fda_image = fda_image.float() / 255.0
+
+        # get source image
         additional_targets = {'depth': 'mask'}
         aug = A.Compose(transforms=self.transform,
                         additional_targets=additional_targets)
         sample1 = aug(image=image, depth=depth)
+        image = sample1['image'].float()/255.0      
+        depth = sample1['depth'].float()
 
-            
-        return sample1['image'].float()/255.0, sample1['depth'].float()
+        return [image,fda_image], depth
+
 
     def __len__(self):
         return len(self.filenames)
@@ -91,14 +103,6 @@ class SQUIDdataset(Dataset):
         image = np.array(image)
         depth = np.array(depth)
         
-        # if self.is_predict:
-        #     resize_h = image.shape[0]//32 // 2 * 32
-        #     resize_w = image.shape[1]//32 // 2 * 32
-        #     image = cv2.resize(image, (resize_w, resize_h))
-        #     depth = cv2.resize(depth, (resize_w, resize_h))
-        #     image = self.transform(image)
-        #     depth = self.transform(depth)
-        # else:
         additional_targets = {'depth': 'mask'}
         aug = A.Compose(transforms=self.transform,
                         additional_targets=additional_targets)
@@ -121,70 +125,62 @@ class MyDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.numworkers = numworkers
 
-        if FDA_trans:
-            reference_images = glob.glob(predict_data_path + '/undistorted_images/*.png')
-            self.train_transform = [
-                A.Resize(self.scale_size[0], self.scale_size[1]),
-                A.FDA(reference_images=reference_images, beta_limit=0.01),
-                A.Blur(blur_limit=3, p=0.1),
-                A.HorizontalFlip(),
-                # A.RandomCrop(crop_size[0], crop_size[1]),
-                A.RandomBrightnessContrast(),
-                A.RandomGamma(),
-                A.HueSaturationValue(),
-                ToTensorV2(transpose_mask=True)
-            ]
-        else:
-            self.train_transform = [
-                A.Resize(self.scale_size[0], self.scale_size[1]),
-                A.HorizontalFlip(),
-                # A.RandomCrop(crop_size[0], crop_size[1]),
-                A.RandomBrightnessContrast(),
-                A.RandomGamma(),
-                A.HueSaturationValue(),
-                ToTensorV2(transpose_mask=True)
-            ]  
+        reference_images = glob.glob(predict_data_path + '/undistorted_images/*.png')
+        self.train_transform_fda = [
+            A.Resize(self.scale_size[0], self.scale_size[1]),
+            A.FDA(reference_images=reference_images, beta_limit=0.01,p=1),
+            A.Blur(blur_limit=3, p=0.5),
+            ToTensorV2(transpose_mask=True)
+        ]
+        self.train_transform = [
+            A.Resize(self.scale_size[0], self.scale_size[1]),
+            ToTensorV2(transpose_mask=True)
+        ]  
         self.test_transform = [
             A.Resize(self.scale_size[0], self.scale_size[1]),
             ToTensorV2(transpose_mask=True)
         ]
 
 
-    def train_dataloader(self):
+    def train_dataloader(self, covstate=False):
         if self.data_name=='nyu2':
-            train_dataset = Nyu2Dataset(self.data_path, transform=self.train_transform , istrain=True)
-        elif self.data_name=='lichongyi':
-            train_dataset = lichongyi_dataset(self.data_path, transform=self.train_transform , istrain=True)
+            train_dataset = Nyu2Dataset(self.data_path, transform=self.train_transform, fda_transform = self.train_transform_fda, istrain=True)
         elif self.data_name=='SQUID':
             train_dataset = SQUIDdataset(self.data_path, transform=self.train_transform , istrain=True)
         else:
             raise ValueError('data Error!')
-        train_loader = DataLoader(
-            train_dataset,
-            self.batch_size,
-            shuffle=True,
-            num_workers=self.numworkers,
-            pin_memory=False)
+        if covstate:
+            train_loader = DataLoader(
+                train_dataset,
+                1,
+                shuffle=True,
+                num_workers=self.numworkers,
+                pin_memory=False)
+        else:
+            train_loader = DataLoader(
+                train_dataset,
+                self.batch_size,
+                shuffle=True,
+                num_workers=self.numworkers,
+                pin_memory=False)
 
         return train_loader
 
     def val_dataloader(self):
         if self.data_name == 'nyu2':
-            test_dataset = Nyu2Dataset(self.data_path, transform=self.test_transform, istrain=False)
-        elif self.data_name == 'lichongyi':
-            test_dataset = lichongyi_dataset(self.data_path, transform=self.test_transform, istrain=False)
+            val_dataset = Nyu2Dataset(self.data_path, transform=self.test_transform, fda_transform = self.train_transform_fda, istrain=False)
         elif self.data_name == 'SQUID':
-            test_dataset = SQUIDdataset(self.data_path, transform=self.test_transform, istrain=False)
+            val_dataset = SQUIDdataset(self.data_path, transform=self.test_transform, istrain=False)
         else:
             raise ValueError('data Error!')
-        test_loader = DataLoader(
-            test_dataset,
+        val_loader = DataLoader(
+            val_dataset,
             self.batch_size,
             shuffle=False,
             num_workers=self.numworkers,
             pin_memory=False)
 
-        return test_loader
+        return val_loader
 
     def predict_dataloader(self):
         predict_dataset = SQUIDdataset(self.predict_data_path, self.test_transform, is_predict=True)
