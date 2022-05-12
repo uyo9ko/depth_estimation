@@ -73,18 +73,20 @@ class Encoder(nn.Module):
 
 
 class MyModel(LightningModule):
-    def __init__(self, lr, loss_alphas, weight_decay, min_depth, max_depth, load_ckpt_paths, save_png_path): 
+    def __init__(self, lr, loss_alphas, weight_decay, min_depth, max_depth, save_png_path): 
         super().__init__()
+        self.automatic_optimization = False
+
         #parameters
         self.lr = lr
         self.weight_decay = weight_decay
         self.min_depth = min_depth
         self.max_depth = max_depth
         self.alphas = loss_alphas
-        self.load_ckpt_paths = load_ckpt_paths
         self.save_png_path = save_png_path
         self.save_hyperparameters()
 
+        
         #modules
         self.encoder = Encoder()
         self.decoder = Decoder()
@@ -92,11 +94,11 @@ class MyModel(LightningModule):
         self.l1_criterion = nn.L1Loss()
 
         self.cov_matrix_layer = []
-        self.cov_type = []
-        for i in range(len(self.args.wt_layer)):
+        in_channel_list = [64, 256, 640]
+        for i in range(3):
             self.cov_matrix_layer.append(CovMatrix_ISW(dim=in_channel_list[i], 
-                                        relax_denom=self.args.relax_denom, 
-                                        clusters=self.args.clusters))
+                                        relax_denom=0.0, 
+                                        clusters=2))
 
         
     def forward(self, x, isw=False):
@@ -108,51 +110,76 @@ class MyModel(LightningModule):
             return self.decoder(x)
         
     
-    def training_step(self, epoch, batch, batch_idx):
-        image, depth = batch
-        if epoch < 5:
-            train_out= self(image)
-        else:
-            train_out, w_arr = self(image, isw=True)
+    def training_step(self, batch, batch_idx):
+        opt = self.optimizers()
+        images, depth = batch
+        for image in images:
+            if self.current_epoch < 5:
+                train_out= self(image)
+            else:
+                train_out, w_arr = self(image, isw=True)
+            
+                # calculate  wt_loss
+                wt_loss = torch.FloatTensor([0]).cuda()
+                for index, f_map in enumerate(w_arr):
+                    eye, mask_matrix, margin, num_remove_cov = self.cov_matrix_layer[index].get_mask_matrix()
+                    loss = instance_whitening_loss(f_map, eye, mask_matrix, margin, num_remove_cov)
+                    wt_loss = wt_loss + loss
+                wt_loss = wt_loss / len(w_arr)
+
+            train_loss_depth = self.alphas[0] * self.l1_criterion(train_out, depth) 
+            train_loss_ssim = self.alphas[1] * (1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) 
+            
+            # train_Silog_loss = self.alphas[3] * self.SiLog(train_out.squeeze(), depth.squeeze()) 
+            # train_loss_ssim = torch.clamp((1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) * 0.5, 0, 1)
+
+            if self.current_epoch < 5:
+                train_loss =   train_loss_depth + train_loss_ssim
+            else:
+                train_loss_wt = self.alphas[2] * wt_loss
+                train_loss =   train_loss_depth + train_loss_ssim + train_loss_wt
+                self.log('l_wt', train_loss_wt)
+
+            self.log('l_d', train_loss_depth) 
+            self.log('l_ssim', train_loss_ssim)
+            self.log( 'l_t', train_loss)
+            opt.zero_grad()
+            self.manual_backward(train_loss)
+            opt.step()
+
+    def training_epoch_end(self, outputs):
+        if self.current_epoch == 5:
+            for index in range(len(self.cov_matrix_layer)):
+                self.cov_matrix_layer[index].reset_mask_matrix()
+
+            covstat_dataloader = self.train_dataloader(covstat=True)
+            for batch_idx, batch in enumerate(covstat_dataloader):
+                images, depth = batch
+                x = torch.cat(images, dim=0)
+                out, w_arr = self(x, isw=True)
+                for index, f_map in enumerate(w_arr):
+                    # Instance Whitening
+                    B, C, H, W = f_map.shape  # i-th feature size (B X C X H X W)
+                    HW = H * W
+                    f_map = f_map.contiguous().view(B, C, -1)  # B X C X H X W > B X C X (H X W)
+                    eye, reverse_eye = self.cov_matrix_layer[index].get_eye_matrix()
+                    f_cor = torch.bmm(f_map, f_map.transpose(1, 2)).div(HW - 1) + (self.eps * eye)  # B X C X C / HW
+                    off_diag_elements = f_cor * reverse_eye
+                    #print("here", off_diag_elements.shape)
+                    self.cov_matrix_layer[index].set_variance_of_covariance(torch.var(off_diag_elements, dim=0))
+
+            for index in range(len(self.cov_matrix_layer)):
+                self.cov_matrix_layer[index].set_mask_matrix()
+
+
         
-        # calculate  wt_loss
-        wt_loss = torch.FloatTensor([0]).cuda()
-        for index, f_map in enumerate(w_arr):
-            # Instance Whitening
-            B, C, H, W = f_map.shape  # i-th feature size (B X C X H X W)
-            HW = H * W
-            f_map = f_map.contiguous().view(B, C, -1)  # B X C X H X W > B X C X (H X W)
-            eye, reverse_eye = self.cov_matrix_layer[index].get_eye_matrix()
-            f_cor = torch.bmm(f_map, f_map.transpose(1, 2)).div(HW - 1) + (self.eps * eye)  # B X C X C / HW
-            off_diag_elements = f_cor * reverse_eye
-            #print("here", off_diag_elements.shape)
-            self.cov_matrix_layer[index].set_variance_of_covariance(torch.var(off_diag_elements, dim=0))
-            eye, mask_matrix, margin, num_remove_cov = self.cov_matrix_layer[index].get_mask_matrix()
-            loss = instance_whitening_loss(f_map, eye, mask_matrix, margin, num_remove_cov)
-            wt_loss = wt_loss + loss
-        wt_loss = wt_loss / len(w_arr)
-
-        train_loss_depth = self.alphas[0] * self.l1_criterion(train_out, depth) 
-        train_loss_ssim = self.alphas[1] * (1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) 
-        train_loss_wt = self.alphas[2] * wt_loss
-        # train_Silog_loss = self.alphas[3] * self.SiLog(train_out.squeeze(), depth.squeeze()) 
-        # train_loss_ssim = torch.clamp((1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) * 0.5, 0, 1)
-
-        if epoch < 5:
-            train_loss =   train_loss_depth + train_loss_ssim
-        else:
-            train_loss =   train_loss_depth + train_loss_ssim + train_loss_wt
-            self.log('l_wt', train_loss_wt)
-
-        self.log('l_d', train_loss_depth) 
-        self.log('l_ssim', train_loss_ssim)
-        self.log( 'l_t', train_loss)
-        return train_loss
-    
-        
+       
     def validation_step(self, batch, batch_idx):
-        image, val_depth = batch
-        val_out = self(image)
+        
+        images, depth = batch
+        val_input = torch.cat(images, dim=0)
+        val_out = self(val_input)
+
         val_loss_depth = self.alphas[0] * self.l1_criterion(val_out, val_depth) 
         val_loss_ssim = self.alphas[1] * (1 - ssim(val_out, val_depth, val_range=self.max_depth - self.min_depth)) 
         # val_Silog_loss = self.alphas[3] * self.SiLog(val_out.squeeze(), val_depth.squeeze())

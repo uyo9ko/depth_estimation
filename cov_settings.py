@@ -1,8 +1,17 @@
 import torch
 import torch.nn as nn
-from network.mynn import initialize_embedding
+
 import kmeans1d
 
+
+def initialize_embedding(*models):
+    """
+    Initialize Model Weights
+    """
+    for model in models:
+        for module in model.modules():
+            if isinstance(module, nn.Embedding):
+                module.weight.data.zero_() #original
 
 def make_cov_index_matrix(dim):  # make symmetric matrix for embedding index
     matrix = torch.LongTensor()
@@ -36,7 +45,7 @@ class CovMatrix_ISW:
             print("cluster == ", self.clusters)
             self.margin = 0
         else:                   # do not use
-            self.margin = self.num_off_diagonal // relax_denom
+            self.margin = torch.div(self.num_off_diagonal,  relax_denom, rounding_mode='floor')
 
     def get_eye_matrix(self):
         return self.i, self.reversal_i
