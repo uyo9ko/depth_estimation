@@ -9,9 +9,8 @@ model:
   lr: 1e-4 
   loss_alphas:
     - 1.0
-    - 0.0
     - 1.0
-    - 0.0
+
   weight_decay: 0.0001
   min_depth: 1e-3
   max_depth: 10
@@ -21,11 +20,11 @@ data:
   train_data_path: /root/zhshen/datasets/nyu
   predict_data_path: /root/zhshen/datasets/my_SQUID
   numworkers: 0
-  batch_size: 4
+  batch_size: 8
   scale_size:
     - 448
     - 576
 logger:
   proj_name: isw_densedepth
-  version: v1
+  version: v2
   wandb_savedir: /root/zhshen/wandb

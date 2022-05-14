@@ -12,6 +12,8 @@ import os
 import numpy as np
 from cov_settings import CovMatrix_ISW
 from instance_whitening import *
+from dataset import MyDataModule
+import tqdm as tqdm
 
 class UpSample(nn.Sequential):
     def __init__(self, input_channel, output_channel):
@@ -56,20 +58,21 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
         self.original_model = models.densenet161(pretrained=True)
-        self.original_model.norm0 = InstanceWhitening(64)
-        self.w_arr = []
 
     def forward(self, x, isw=False):
         features = [x]
+        w_arr = []
         for k, v in self.original_model.features._modules.items():
             if isw and (k == "norm0" or k == "denseblock1" or k == "denseblock2"):
                 out = v(features[-1])
                 out, w = InstanceWhitening(out.shape[1])(out)
-                self.w_arr.append(w)
+                w_arr.append(w)
                 features.append(out)
             else:
                 features.append(v(features[-1]))
-        return features  
+        if isw:
+            return features, w_arr
+        return features
 
 
 class MyModel(LightningModule):
@@ -84,9 +87,9 @@ class MyModel(LightningModule):
         self.max_depth = max_depth
         self.alphas = loss_alphas
         self.save_png_path = save_png_path
+        self.eps = 1e-5
         self.save_hyperparameters()
 
-        
         #modules
         self.encoder = Encoder()
         self.decoder = Decoder()
@@ -94,7 +97,7 @@ class MyModel(LightningModule):
         self.l1_criterion = nn.L1Loss()
 
         self.cov_matrix_layer = []
-        in_channel_list = [64, 256, 640]
+        in_channel_list = [96, 384, 768]
         for i in range(3):
             self.cov_matrix_layer.append(CovMatrix_ISW(dim=in_channel_list[i], 
                                         relax_denom=0.0, 
@@ -103,60 +106,22 @@ class MyModel(LightningModule):
         
     def forward(self, x, isw=False):
         if isw:
-            x = self.encoder(x, isw=True)
-            return self.decoder(x), self.encoder.w_arr
+            x, w_arr= self.encoder(x, isw=True)
+            return self.decoder(x), w_arr
         else:
             x = self.encoder(x)
             return self.decoder(x)
         
     
     def training_step(self, batch, batch_idx):
-        opt = self.optimizers()
-        images, depth = batch
-        for image in images:
-            if self.current_epoch < 5:
-                train_out= self(image)
-            else:
-                train_out, w_arr = self(image, isw=True)
-            
-                # calculate  wt_loss
-                wt_loss = torch.FloatTensor([0]).cuda()
-                for index, f_map in enumerate(w_arr):
-                    eye, mask_matrix, margin, num_remove_cov = self.cov_matrix_layer[index].get_mask_matrix()
-                    loss = instance_whitening_loss(f_map, eye, mask_matrix, margin, num_remove_cov)
-                    wt_loss = wt_loss + loss
-                wt_loss = wt_loss / len(w_arr)
-
-            train_loss_depth = self.alphas[0] * self.l1_criterion(train_out, depth) 
-            train_loss_ssim = self.alphas[1] * (1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) 
-            
-            # train_Silog_loss = self.alphas[3] * self.SiLog(train_out.squeeze(), depth.squeeze()) 
-            # train_loss_ssim = torch.clamp((1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) * 0.5, 0, 1)
-
-            if self.current_epoch < 5:
-                train_loss =   train_loss_depth + train_loss_ssim
-            else:
-                train_loss_wt = self.alphas[2] * wt_loss
-                train_loss =   train_loss_depth + train_loss_ssim + train_loss_wt
-                self.log('l_wt', train_loss_wt)
-
-            self.log('l_d', train_loss_depth) 
-            self.log('l_ssim', train_loss_ssim)
-            self.log( 'l_t', train_loss)
-            opt.zero_grad()
-            self.manual_backward(train_loss)
-            opt.step()
-
-    def training_epoch_end(self, outputs):
         if self.current_epoch == 5:
-            for index in range(len(self.cov_matrix_layer)):
-                self.cov_matrix_layer[index].reset_mask_matrix()
-
-            covstat_dataloader = self.train_dataloader(covstat=True)
-            for batch_idx, batch in enumerate(covstat_dataloader):
-                images, depth = batch
-                x = torch.cat(images, dim=0)
+            images, depth = batch
+            src_image = torch.chunk(images[0], depth.shape[0], dim=0)
+            tgt_image = torch.chunk(images[1], depth.shape[0], dim=0)
+            for i in range(depth.shape[0]):
+                x = torch.cat([src_image[i],tgt_image[i]], dim=0)
                 out, w_arr = self(x, isw=True)
+                assert len(w_arr) == 3
                 for index, f_map in enumerate(w_arr):
                     # Instance Whitening
                     B, C, H, W = f_map.shape  # i-th feature size (B X C X H X W)
@@ -167,17 +132,59 @@ class MyModel(LightningModule):
                     off_diag_elements = f_cor * reverse_eye
                     #print("here", off_diag_elements.shape)
                     self.cov_matrix_layer[index].set_variance_of_covariance(torch.var(off_diag_elements, dim=0))
+        else:
+            opt = self.optimizers()
+            images, depth = batch
+            for image in images:
+                if self.current_epoch < 5:
+                    train_out= self(image)
+                else:
+                    train_out, w_arr = self(image, isw=True)
+                
+                    # calculate  wt_loss
+                    wt_loss = torch.FloatTensor([0]).cuda()
+                    for index, f_map in enumerate(w_arr):
+                        eye, mask_matrix, margin, num_remove_cov = self.cov_matrix_layer[index].get_mask_matrix()
+                        loss = instance_whitening_loss(f_map, eye, mask_matrix, margin, num_remove_cov)
+                        wt_loss = wt_loss + loss
+                    wt_loss = wt_loss / len(w_arr)
 
+                train_loss_depth = self.alphas[0] * self.l1_criterion(train_out, depth) 
+                train_loss_ssim = self.alphas[1] * (1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) 
+                
+                # train_Silog_loss = self.alphas[3] * self.SiLog(train_out.squeeze(), depth.squeeze()) 
+                # train_loss_ssim = torch.clamp((1 - ssim(train_out, depth, val_range=self.max_depth - self.min_depth)) * 0.5, 0, 1)
+
+                if self.current_epoch < 5:
+                    train_loss =   train_loss_depth + train_loss_ssim
+                else:
+                    train_loss_wt = self.alphas[2] * wt_loss
+                    train_loss =   train_loss_depth + train_loss_ssim + train_loss_wt
+                    self.log('l_wt', train_loss_wt)
+
+                self.log('l_d', train_loss_depth) 
+                self.log('l_ssim', train_loss_ssim)
+                self.log( 'l_t', train_loss)
+                opt.zero_grad()
+                self.manual_backward(train_loss)
+                opt.step()
+
+    def on_train_epoch_start(self) -> None:
+        if self.current_epoch == 5:
+            for index in range(len(self.cov_matrix_layer)):
+                self.cov_matrix_layer[index].reset_mask_matrix()
+
+    def on_train_epoch_end(self) -> None:
+        if self.current_epoch == 5:
             for index in range(len(self.cov_matrix_layer)):
                 self.cov_matrix_layer[index].set_mask_matrix()
 
-
-        
        
     def validation_step(self, batch, batch_idx):
         
         images, depth = batch
         val_input = torch.cat(images, dim=0)
+        val_depth = torch.cat([depth, depth], dim=0)
         val_out = self(val_input)
 
         val_loss_depth = self.alphas[0] * self.l1_criterion(val_out, val_depth) 
@@ -187,7 +194,7 @@ class MyModel(LightningModule):
         
         val_loss =  val_loss_depth + val_loss_ssim
 
-        val_depth, val_out  = process_depth(val_depth,val_out,self.min_depth, self.max_depth)
+        val_depth, val_out  = process_depth(val_depth, val_out, self.min_depth, self.max_depth)
         val_acc = compute_acc(val_depth, val_out)
         self.log('val_acc', val_acc)
         self.log("val_loss", val_loss)
@@ -197,6 +204,8 @@ class MyModel(LightningModule):
     def predict_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
+        y = y.cpu().numpy()
+        y_hat = y_hat.cpu().numpy()
         gt, pred = np_process_depth(y, y_hat, self.min_depth, self.max_depth)
         metrics = compute_errors(gt, pred)
 

@@ -53,7 +53,8 @@ class Nyu2Dataset(Dataset):
         depth = depth[..., np.newaxis]
 
         # get fda transform image
-        fda_image = self.fda_transform(image=image)['image']
+        aug_fda = A.Compose(transforms=self.fda_transform)
+        fda_image = aug_fda(image=image)['image']
         fda_image = fda_image.float() / 255.0
 
         # get source image
@@ -128,7 +129,7 @@ class MyDataModule(LightningDataModule):
         reference_images = glob.glob(predict_data_path + '/undistorted_images/*.png')
         self.train_transform_fda = [
             A.Resize(self.scale_size[0], self.scale_size[1]),
-            A.FDA(reference_images=reference_images, beta_limit=0.01,p=1),
+            A.FDA(reference_images=reference_images, beta_limit=0.01, p=1),
             A.Blur(blur_limit=3, p=0.5),
             ToTensorV2(transpose_mask=True)
         ]
@@ -142,14 +143,14 @@ class MyDataModule(LightningDataModule):
         ]
 
 
-    def train_dataloader(self, covstate=False):
+    def train_dataloader(self, covstat=False):
         if self.data_name=='nyu2':
             train_dataset = Nyu2Dataset(self.data_path, transform=self.train_transform, fda_transform = self.train_transform_fda, istrain=True)
         elif self.data_name=='SQUID':
             train_dataset = SQUIDdataset(self.data_path, transform=self.train_transform , istrain=True)
         else:
             raise ValueError('data Error!')
-        if covstate:
+        if covstat:
             train_loader = DataLoader(
                 train_dataset,
                 1,
