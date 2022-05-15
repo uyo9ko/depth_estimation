@@ -33,8 +33,6 @@ def my_app(cfg : DepthConfig) -> None:
                 weight_decay= cfg.model.weight_decay,
                 min_depth= cfg.model.min_depth,
                 max_depth= cfg.model.max_depth,
-                load_ckpt_paths= cfg.model.load_ckpt_paths,
-                save_png_path= cfg.model.save_png_path
                 ) 
     data = MyDataModule(
         data_name= cfg.data.data_name,
@@ -52,7 +50,6 @@ def my_app(cfg : DepthConfig) -> None:
         logger=wandb_logger,
         auto_lr_find=cfg.trainer.auto_lr_find,
         callbacks=[checkpoint_callback],
-        log_every_n_steps=2
         )
 
     # trainer.tune(model, datamodule=data)

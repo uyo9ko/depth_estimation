@@ -75,7 +75,7 @@ class DenseDepth(nn.Module):
 
 
 class MyModel(LightningModule):
-    def __init__(self, lr, loss_alphas, weight_decay, min_depth, max_depth, load_ckpt_paths, save_png_path): 
+    def __init__(self, lr, loss_alphas, weight_decay, min_depth, max_depth): 
         super().__init__()
         #parameters
         self.lr = lr
@@ -83,8 +83,6 @@ class MyModel(LightningModule):
         self.min_depth = min_depth
         self.max_depth = max_depth
         self.alphas = loss_alphas
-        self.load_ckpt_paths = load_ckpt_paths
-        self.save_png_path = save_png_path
         self.save_hyperparameters()
         
         #loss functions
@@ -95,12 +93,6 @@ class MyModel(LightningModule):
         
         self.model = DenseDepth()
 
-        # model_weight = torch.load(self.load_ckpt_paths[1])
-        # if 'module' in next(iter(model_weight.items()))[0]:
-        #     model_weight = OrderedDict((k[7:], v) for k, v in model_weight.items())
-        # self.model.load_state_dict(model_weight)
-        # print('load GLP model success from {}'.format(self.load_ckpt_paths[1]))
-        
     def forward(self, x):
         x = self.model(x)
         return x
@@ -145,21 +137,7 @@ class MyModel(LightningModule):
         y_hat = self(x)
         gt, pred = np_process_depth(y, y_hat, self.min_depth, self.max_depth)
         metrics = compute_errors(gt, pred)
-
-
-        ## visualization
-        y = y.cpu().numpy().squeeze()
-        y_hat = y_hat.cpu().numpy().squeeze()
-        norm_y_hat = cv2.normalize(y_hat, None, alpha = 0, beta = 255, norm_type = cv2.NORM_MINMAX, dtype = cv2.CV_32F) 
-        im_color = cv2.applyColorMap(norm_y_hat.astype(np.uint8), cv2.COLORMAP_JET) 
-        cv2.imwrite(os.path.join(self.save_path, 'pred/{}_.png'.format(batch_idx)), im_color)
-        norm_y = cv2.normalize(y, None, alpha = 0, beta = 255, norm_type = cv2.NORM_MINMAX, dtype = cv2.CV_32F) 
-        im_color = cv2.applyColorMap(norm_y.astype(np.uint8), cv2.COLORMAP_JET) 
-        cv2.imwrite(os.path.join(self.save_path, 'gt/{}.png'.format(batch_idx)), im_color) 
-        x = x.cpu().numpy().squeeze()*255
-        x = x.transpose(1,2,0)
-        x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
-        cv2.imwrite(os.path.join(self.save_path, 'img/{}.png'.format(batch_idx)), x)          
+ 
 
         return metrics
 

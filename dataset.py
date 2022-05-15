@@ -125,13 +125,8 @@ class MyDataModule(LightningDataModule):
             reference_images = glob.glob(predict_data_path + '/undistorted_images/*.png')
             self.train_transform = [
                 A.Resize(self.scale_size[0], self.scale_size[1]),
-                A.FDA(reference_images=reference_images, beta_limit=0.01),
-                A.Blur(blur_limit=3, p=0.1),
-                A.HorizontalFlip(),
-                # A.RandomCrop(crop_size[0], crop_size[1]),
-                A.RandomBrightnessContrast(),
-                A.RandomGamma(),
-                A.HueSaturationValue(),
+                A.FDA(reference_images=reference_images, beta_limit=0.01, p=1.0),
+                A.Blur(blur_limit=3, p=0.5),
                 ToTensorV2(transpose_mask=True)
             ]
         else:
