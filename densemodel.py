@@ -114,24 +114,28 @@ class MyModel(LightningModule):
         
     
     def training_step(self, batch, batch_idx):
-        if self.current_epoch == 5:
+        if self.current_epoch == 5 and 0:
             images, depth = batch
             src_image = torch.chunk(images[0], depth.shape[0], dim=0)
             tgt_image = torch.chunk(images[1], depth.shape[0], dim=0)
             for i in range(depth.shape[0]):
                 x = torch.cat([src_image[i],tgt_image[i]], dim=0)
-                out, w_arr = self(x, isw=True)
-                assert len(w_arr) == 3
-                for index, f_map in enumerate(w_arr):
-                    # Instance Whitening
-                    B, C, H, W = f_map.shape  # i-th feature size (B X C X H X W)
-                    HW = H * W
-                    f_map = f_map.contiguous().view(B, C, -1)  # B X C X H X W > B X C X (H X W)
-                    eye, reverse_eye = self.cov_matrix_layer[index].get_eye_matrix()
-                    f_cor = torch.bmm(f_map, f_map.transpose(1, 2)).div(HW - 1) + (self.eps * eye)  # B X C X C / HW
-                    off_diag_elements = f_cor * reverse_eye
-                    #print("here", off_diag_elements.shape)
-                    self.cov_matrix_layer[index].set_variance_of_covariance(torch.var(off_diag_elements, dim=0))
+                with torch.no_grad():
+                    out, w_arr = self(x, isw=True)
+                    assert len(w_arr) == 3
+                    for index, f_map in enumerate(w_arr):
+                        # Instance Whitening
+                        B, C, H, W = f_map.shape  # i-th feature size (B X C X H X W)
+                        HW = H * W
+                        f_map = f_map.contiguous().view(B, C, -1)  # B X C X H X W > B X C X (H X W)
+                        eye, reverse_eye = self.cov_matrix_layer[index].get_eye_matrix()
+                        f_cor = torch.bmm(f_map, f_map.transpose(1, 2)).div(HW - 1) + (self.eps * eye)  # B X C X C / HW
+                        off_diag_elements = f_cor * reverse_eye
+                        #print("here", off_diag_elements.shape)
+                        self.cov_matrix_layer[index].set_variance_of_covariance(torch.var(off_diag_elements, dim=0))
+            if batch_idx % 100 == 0:
+                for index in range(len(self.cov_matrix_layer)):
+                    self.cov_matrix_layer[index].set_mask_matrix()            
         else:
             opt = self.optimizers()
             images, depth = batch
@@ -171,22 +175,33 @@ class MyModel(LightningModule):
 
     def on_train_epoch_start(self) -> None:
         if self.current_epoch == 5:
-            for index in range(len(self.cov_matrix_layer)):
-                self.cov_matrix_layer[index].reset_mask_matrix()
+            if os.path.exists('mask_matrix_0.pth'):
+                for index in range(len(self.cov_matrix_layer)):
+                    self.cov_matrix_layer[index].load_mask_matrix('mask_matrix_'+str(index)+'.pth')
+            else:
+                for index in range(len(self.cov_matrix_layer)):
+                    self.cov_matrix_layer[index].reset_mask_matrix()
 
-    def on_train_epoch_end(self) -> None:
-        if self.current_epoch == 5:
-            for index in range(len(self.cov_matrix_layer)):
-                self.cov_matrix_layer[index].set_mask_matrix()
+    # def on_train_epoch_end(self) -> None:
+    #     if self.current_epoch == 5:
+    #         for index in range(len(self.cov_matrix_layer)):
+    #             self.cov_matrix_layer[index].save_mask_matrix('mask_matrix_'+str(index)+'.pth')
+
+    # def on_train_batch_start(self, batch, batch_idx) -> None:
+    #     if self.current_epoch == 5:
+    #         if batch_idx > 999:
+    #             return
+                
 
        
     def validation_step(self, batch, batch_idx):
-        
         images, depth = batch
         val_input = torch.cat(images, dim=0)
         val_depth = torch.cat([depth, depth], dim=0)
-        val_out = self(val_input)
-
+        if self.current_epoch < 5:
+            val_out = self(val_input)
+        else:
+            val_out, _ = self(val_input, isw=True)
         val_loss_depth = self.alphas[0] * self.l1_criterion(val_out, val_depth) 
         val_loss_ssim = self.alphas[1] * (1 - ssim(val_out, val_depth, val_range=self.max_depth - self.min_depth)) 
         # val_Silog_loss = self.alphas[3] * self.SiLog(val_out.squeeze(), val_depth.squeeze())

@@ -58,6 +58,17 @@ class CovMatrix_ISW:
     def reset_mask_matrix(self):
         self.mask_matrix = None
 
+    def save_mask_matrix(self, path):
+        if self.mask_matrix is not None:
+            torch.save(self.mask_matrix, path)
+            print("Save mask matrix to", path)
+
+    def load_mask_matrix(self, path):
+        self.mask_matrix = torch.load(path)
+        self.num_sensitive = torch.sum(self.mask_matrix)
+        print("Load mask matrix from", path)
+        print("Selective (Sensitive Covariance)", self.num_sensitive)
+
     def set_mask_matrix(self):
         # torch.set_printoptions(threshold=500000)
         self.var_matrix = self.var_matrix / self.count_var_cov

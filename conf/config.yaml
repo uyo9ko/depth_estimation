@@ -10,6 +10,7 @@ model:
   loss_alphas:
     - 1.0
     - 1.0
+    - 1.0
 
   weight_decay: 0.0001
   min_depth: 1e-3
@@ -26,5 +27,5 @@ data:
     - 576
 logger:
   proj_name: isw_densedepth
-  version: v2
+  version: v3
   wandb_savedir: /root/zhshen/wandb
