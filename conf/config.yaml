@@ -3,7 +3,7 @@ defaults:
 trainer:
   gpus: 1
   trainer_path: /root/zhshen/lightning_ckpt
-  max_epochs: 20
+  max_epochs: 15
   auto_lr_find: False
 model:
   lr: 1e-4 

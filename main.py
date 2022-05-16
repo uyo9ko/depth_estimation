@@ -23,6 +23,7 @@ def my_app(cfg : DepthConfig) -> None:
                                save_dir=cfg.logger.wandb_savedir)
     checkpoint_callback = ModelCheckpoint(monitor="val_loss",
                                         mode='min', 
+                                        save_top_k=3,
                                         every_n_train_steps=0, 
                                         every_n_epochs=1, 
                                         train_time_interval=None, 
@@ -42,7 +43,6 @@ def my_app(cfg : DepthConfig) -> None:
             weight_decay= cfg.model.weight_decay,
             min_depth= cfg.model.min_depth,
             max_depth= cfg.model.max_depth,
-            save_png_path= cfg.model.save_png_path
         ) 
     trainer = Trainer(
         default_root_dir=cfg.trainer.trainer_path,
@@ -50,8 +50,9 @@ def my_app(cfg : DepthConfig) -> None:
         max_epochs=cfg.trainer.max_epochs,
         logger=wandb_logger,
         auto_lr_find=cfg.trainer.auto_lr_find,
+        enable_checkpointing = True,
         callbacks=[checkpoint_callback],
-        log_every_n_steps=2
+        # log_every_n_steps=2
         )
 
     # trainer.tune(model, datamodule=data)

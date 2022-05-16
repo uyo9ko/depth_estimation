@@ -12,8 +12,7 @@ import os
 import numpy as np
 from cov_settings import CovMatrix_ISW
 from instance_whitening import *
-from dataset import MyDataModule
-import tqdm as tqdm
+
 
 class UpSample(nn.Sequential):
     def __init__(self, input_channel, output_channel):
@@ -76,7 +75,7 @@ class Encoder(nn.Module):
 
 
 class MyModel(LightningModule):
-    def __init__(self, lr, loss_alphas, weight_decay, min_depth, max_depth, save_png_path): 
+    def __init__(self, lr, loss_alphas, weight_decay, min_depth, max_depth): 
         super().__init__()
         self.automatic_optimization = False
 
@@ -86,7 +85,6 @@ class MyModel(LightningModule):
         self.min_depth = min_depth
         self.max_depth = max_depth
         self.alphas = loss_alphas
-        self.save_png_path = save_png_path
         self.eps = 1e-5
         self.save_hyperparameters()
 
@@ -95,6 +93,7 @@ class MyModel(LightningModule):
         self.decoder = Decoder()
         #loss functions
         self.l1_criterion = nn.L1Loss()
+
 
         self.cov_matrix_layer = []
         in_channel_list = [96, 384, 768]
@@ -114,7 +113,7 @@ class MyModel(LightningModule):
         
     
     def training_step(self, batch, batch_idx):
-        if self.current_epoch == 5 and 0:
+        if self.current_epoch == 5:
             images, depth = batch
             src_image = torch.chunk(images[0], depth.shape[0], dim=0)
             tgt_image = torch.chunk(images[1], depth.shape[0], dim=0)
@@ -175,23 +174,21 @@ class MyModel(LightningModule):
 
     def on_train_epoch_start(self) -> None:
         if self.current_epoch == 5:
+            for index in range(len(self.cov_matrix_layer)):
+                self.cov_matrix_layer[index].reset_mask_matrix()
+
+
+    def on_train_batch_start(self, batch, batch_idx):
+        if self.current_epoch == 5:
             if os.path.exists('mask_matrix_0.pth'):
                 for index in range(len(self.cov_matrix_layer)):
                     self.cov_matrix_layer[index].load_mask_matrix('mask_matrix_'+str(index)+'.pth')
-            else:
+                return -1
+            if batch_idx > 999:
                 for index in range(len(self.cov_matrix_layer)):
-                    self.cov_matrix_layer[index].reset_mask_matrix()
+                    self.cov_matrix_layer[index].save_mask_matrix('mask_matrix_'+str(index)+'.pth')
+                return -1
 
-    # def on_train_epoch_end(self) -> None:
-    #     if self.current_epoch == 5:
-    #         for index in range(len(self.cov_matrix_layer)):
-    #             self.cov_matrix_layer[index].save_mask_matrix('mask_matrix_'+str(index)+'.pth')
-
-    # def on_train_batch_start(self, batch, batch_idx) -> None:
-    #     if self.current_epoch == 5:
-    #         if batch_idx > 999:
-    #             return
-                
 
        
     def validation_step(self, batch, batch_idx):
@@ -218,7 +215,7 @@ class MyModel(LightningModule):
 
     def predict_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self(x)
+        y_hat, _ = self(x, isw=True)
         y = y.cpu().numpy()
         y_hat = y_hat.cpu().numpy()
         gt, pred = np_process_depth(y, y_hat, self.min_depth, self.max_depth)
