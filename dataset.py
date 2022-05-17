@@ -148,8 +148,6 @@ class MyDataModule(LightningDataModule):
     def train_dataloader(self):
         if self.data_name=='nyu2':
             train_dataset = Nyu2Dataset(self.data_path, transform=self.train_transform , istrain=True)
-        elif self.data_name=='lichongyi':
-            train_dataset = lichongyi_dataset(self.data_path, transform=self.train_transform , istrain=True)
         elif self.data_name=='SQUID':
             train_dataset = SQUIDdataset(self.data_path, transform=self.train_transform , istrain=True)
         else:
@@ -166,8 +164,6 @@ class MyDataModule(LightningDataModule):
     def val_dataloader(self):
         if self.data_name == 'nyu2':
             test_dataset = Nyu2Dataset(self.data_path, transform=self.test_transform, istrain=False)
-        elif self.data_name == 'lichongyi':
-            test_dataset = lichongyi_dataset(self.data_path, transform=self.test_transform, istrain=False)
         elif self.data_name == 'SQUID':
             test_dataset = SQUIDdataset(self.data_path, transform=self.test_transform, istrain=False)
         else:
