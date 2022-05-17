@@ -21,8 +21,9 @@ def my_app(cfg : DepthConfig) -> None:
                                 log_model=True,
                                 version=cfg.logger.version,
                                save_dir=cfg.logger.wandb_savedir)
-    checkpoint_callback = ModelCheckpoint(monitor="val_loss",
-                                        mode='min', 
+    checkpoint_callback = ModelCheckpoint(monitor="val_acc",
+                                        mode='max', 
+                                        save_top_k=3,
                                         every_n_train_steps=0, 
                                         every_n_epochs=1, 
                                         train_time_interval=None, 
@@ -50,6 +51,7 @@ def my_app(cfg : DepthConfig) -> None:
         logger=wandb_logger,
         auto_lr_find=cfg.trainer.auto_lr_find,
         callbacks=[checkpoint_callback],
+        log_every_n_steps= 2
         )
 
     # trainer.tune(model, datamodule=data)

@@ -174,8 +174,8 @@ class MyModel(LightningModule):
         optimizer.step(closure=optimizer_closure)
 
         # manually warm up lr without a scheduler
-        if self.trainer.global_step < 500:
-            lr_scale = min(1.0, float(self.trainer.global_step + 1) / 500.0)
+        if self.trainer.global_step < 50:
+            lr_scale = min(1.0, float(self.trainer.global_step + 1) / 50.0)
             for pg in optimizer.param_groups:
                 pg["lr"] = lr_scale * self.lr
         

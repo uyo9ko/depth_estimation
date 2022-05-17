@@ -17,10 +17,10 @@ model:
   max_depth: 10
 
 data:
-  data_name: nyu2
-  train_data_path: /content/drive/Shareddrives/szh/datasets/nyuv2
+  data_name: SQUID
+  train_data_path: /content/drive/Shareddrives/szh/datasets/SQUID
   predict_data_path: /content/drive/Shareddrives/szh/datasets/SQUID
-  fda_trans: True
+  fda_trans: False
   numworkers: 2
   batch_size: 4
   scale_size:

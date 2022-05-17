@@ -132,11 +132,6 @@ class MyDataModule(LightningDataModule):
         else:
             self.train_transform = [
                 A.Resize(self.scale_size[0], self.scale_size[1]),
-                A.HorizontalFlip(),
-                # A.RandomCrop(crop_size[0], crop_size[1]),
-                A.RandomBrightnessContrast(),
-                A.RandomGamma(),
-                A.HueSaturationValue(),
                 ToTensorV2(transpose_mask=True)
             ]  
         self.test_transform = [
