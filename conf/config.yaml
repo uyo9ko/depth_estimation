@@ -3,7 +3,7 @@ defaults:
 trainer:
   gpus: 1
   trainer_path: /content/drive/Shareddrives/szh/pl_ckpt
-  max_epochs: 20
+  max_epochs: 60
   auto_lr_find: False
 model:
   lr: 1e-4 
@@ -14,7 +14,8 @@ model:
     - 0.0
   weight_decay: 0.0001
   min_depth: 1e-3
-  max_depth: 10
+  max_depth: 120
+  ckpt_path: uy9ko/GLP_depth_decoder_finetune_contrast/model-Nyu_0.2_FDA_v2:v0"
 
 data:
   data_name: SQUID
@@ -27,6 +28,6 @@ data:
     - 448
     - 576
 logger:
-  proj_name: Dense_depth_baseline_new
-  version: none_v3
+  proj_name: Dense_depth_finetune_0521
+  version: no_trans_v1
   wandb_savedir: /content/drive/Shareddrives/szh/wandb
