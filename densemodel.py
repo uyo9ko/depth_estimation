@@ -62,8 +62,11 @@ class Encoder(nn.Module):
         features = [x]
         w_arr = []
         for k, v in self.original_model.features._modules.items():
-            if isw and (k == "norm0" or k == "denseblock1" or k == "denseblock2"):
-                out = v(features[-1])
+            if isw:
+                if k == "norm0":
+                    out = features[-1]
+                elif k == "denseblock1" or k == "denseblock2":
+                    out = v(features[-1])
                 out, w = InstanceWhitening(out.shape[1])(out)
                 w_arr.append(w)
                 features.append(out)
@@ -72,6 +75,17 @@ class Encoder(nn.Module):
         if isw:
             return features, w_arr
         return features
+
+class DenseDepth(nn.Module):
+    def __init__(self,):
+        super(DenseDepth, self).__init__()
+        self.encoder = Encoder()
+        self.decoder = Decoder()
+
+    def forward(self, x):
+        x = self.encoder(x)
+        return self.decoder(x)
+
 
 
 class MyModel(LightningModule):
@@ -89,12 +103,11 @@ class MyModel(LightningModule):
         self.save_hyperparameters()
 
         #modules
-        self.encoder = Encoder()
-        self.decoder = Decoder()
+        self.model = DenseDepth()
         #loss functions
         self.l1_criterion = nn.L1Loss()
 
-
+        self.load_mask = False
         self.cov_matrix_layer = []
         in_channel_list = [96, 384, 768]
         for i in range(3):
@@ -105,11 +118,10 @@ class MyModel(LightningModule):
         
     def forward(self, x, isw=False):
         if isw:
-            x, w_arr= self.encoder(x, isw=True)
-            return self.decoder(x), w_arr
+            out, w_arr= self.model(x, isw=True)
+            return out, w_arr
         else:
-            x = self.encoder(x)
-            return self.decoder(x)
+            return self.model(x)
         
     
     def training_step(self, batch, batch_idx):
@@ -179,15 +191,20 @@ class MyModel(LightningModule):
 
 
     def on_train_batch_start(self, batch, batch_idx):
-        if self.current_epoch == 5:
-            if os.path.exists('mask_matrix_0.pth'):
+        if not self.load_mask:
+            self.load_mask = True
+            mask_path = '/root/zhshen/DE_code/mask_pth/'
+            if os.path.exists(mask_path+'mask_matrix_0.pth'):
                 for index in range(len(self.cov_matrix_layer)):
-                    self.cov_matrix_layer[index].load_mask_matrix('mask_matrix_'+str(index)+'.pth')
+                    self.cov_matrix_layer[index].load_mask_matrix(mask_path+'mask_matrix_'+str(index)+'.pth')
+                print("load mask matrix finished")
                 return -1
             if batch_idx > 999:
                 for index in range(len(self.cov_matrix_layer)):
-                    self.cov_matrix_layer[index].save_mask_matrix('mask_matrix_'+str(index)+'.pth')
+                    self.cov_matrix_layer[index].save_mask_matrix(mask_path + 'mask_matrix_'+str(index)+'.pth')
+                print("save mask matrix finished")
                 return -1
+            
 
 
        
@@ -213,22 +230,22 @@ class MyModel(LightningModule):
 
 
 
-    def predict_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat, _ = self(x, isw=True)
-        y = y.cpu().numpy()
-        y_hat = y_hat.cpu().numpy()
-        gt, pred = np_process_depth(y, y_hat, self.min_depth, self.max_depth)
-        metrics = compute_errors(gt, pred)
+    # def predict_step(self, batch, batch_idx):
+    #     x, y = batch
+    #     y_hat, _ = self(x, isw=True)
+    #     y = y.cpu().numpy()
+    #     y_hat = y_hat.cpu().numpy()
+    #     gt, pred = np_process_depth(y, y_hat, self.min_depth, self.max_depth)
+    #     metrics = compute_errors(gt, pred)
 
-        return metrics
+    #     return metrics
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,weight_decay=self.weight_decay)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr,weight_decay=self.weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            patience=1,
+            patience=3,
             verbose=True
         )
  

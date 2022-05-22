@@ -11,14 +11,17 @@ def initialize_embedding(*models):
     for model in models:
         for module in model.modules():
             if isinstance(module, nn.Embedding):
-                module.weight.data.zero_() #original
+                module.weight.data.zero_()  # original
+
 
 def make_cov_index_matrix(dim):  # make symmetric matrix for embedding index
     matrix = torch.LongTensor()
     s_index = 0
     for i in range(dim):
-        matrix = torch.cat([matrix, torch.arange(s_index, s_index + dim).unsqueeze(0)], dim=0)
-        s_index += (dim - (2 + i))
+        matrix = torch.cat(
+            [matrix, torch.arange(s_index, s_index + dim).unsqueeze(0)], dim=0
+        )
+        s_index += dim - (2 + i)
     return matrix.triu(diagonal=1).transpose(0, 1) + matrix.triu(diagonal=1)
 
 
@@ -40,12 +43,14 @@ class CovMatrix_ISW:
         self.mask_matrix = None
         self.clusters = clusters
         print("num_off_diagonal", self.num_off_diagonal)
-        if relax_denom == 0:    # kmeans1d clustering setting for ISW
+        if relax_denom == 0:  # kmeans1d clustering setting for ISW
             print("relax_denom == 0!!!!!")
             print("cluster == ", self.clusters)
             self.margin = 0
-        else:                   # do not use
-            self.margin = torch.div(self.num_off_diagonal,  relax_denom, rounding_mode='floor')
+        else:  # do not use
+            self.margin = torch.div(
+                self.num_off_diagonal, relax_denom, rounding_mode="floor"
+            )
 
     def get_eye_matrix(self):
         return self.i, self.reversal_i
@@ -74,12 +79,16 @@ class CovMatrix_ISW:
         self.var_matrix = self.var_matrix / self.count_var_cov
         var_flatten = torch.flatten(self.var_matrix)
 
-        if self.margin == 0:    # kmeans1d clustering setting for ISW
-            clusters, centroids = kmeans1d.cluster(var_flatten, self.clusters) # 50 clusters
-            num_sensitive = var_flatten.size()[0] - clusters.count(0)  # 1: Insensitive Cov, 2~50: Sensitive Cov
+        if self.margin == 0:  # kmeans1d clustering setting for ISW
+            clusters, centroids = kmeans1d.cluster(
+                var_flatten, self.clusters
+            )  # 50 clusters
+            num_sensitive = var_flatten.size()[0] - clusters.count(
+                0
+            )  # 1: Insensitive Cov, 2~50: Sensitive Cov
             print("num_sensitive, centroids =", num_sensitive, centroids)
             _, indices = torch.topk(var_flatten, k=int(num_sensitive))
-        else:                   # do not use
+        else:  # do not use
             num_sensitive = self.num_off_diagonal - self.margin
             print("num_sensitive = ", num_sensitive)
             _, indices = torch.topk(var_flatten, k=int(num_sensitive))
@@ -87,7 +96,9 @@ class CovMatrix_ISW:
         mask_matrix[indices] = 1
 
         if self.mask_matrix is not None:
-            self.mask_matrix = (self.mask_matrix.int() & mask_matrix.view(self.dim, self.dim).int()).float()
+            self.mask_matrix = (
+                self.mask_matrix.int() & mask_matrix.view(self.dim, self.dim).int()
+            ).float()
         else:
             self.mask_matrix = mask_matrix.view(self.dim, self.dim)
         self.num_sensitive = torch.sum(self.mask_matrix)
@@ -97,9 +108,12 @@ class CovMatrix_ISW:
         self.count_var_cov = 0
 
         if torch.cuda.current_device() == 0:
-            print("Covariance Info: (CXC Shape, Num_Off_Diagonal)", self.mask_matrix.shape, self.num_off_diagonal)
+            print(
+                "Covariance Info: (CXC Shape, Num_Off_Diagonal)",
+                self.mask_matrix.shape,
+                self.num_off_diagonal,
+            )
             print("Selective (Sensitive Covariance)", self.num_sensitive)
-
 
     def set_variance_of_covariance(self, var_cov):
         if self.var_matrix is None:
@@ -107,6 +121,7 @@ class CovMatrix_ISW:
         else:
             self.var_matrix = self.var_matrix + var_cov
         self.count_var_cov += 1
+
 
 class CovMatrix_IRW:
     def __init__(self, dim, relax_denom=0):

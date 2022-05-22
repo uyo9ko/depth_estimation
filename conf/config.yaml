@@ -5,6 +5,7 @@ trainer:
   trainer_path: /root/zhshen/lightning_ckpt
   max_epochs: 15
   auto_lr_find: False
+  val_check_interval: 0.2
 model:
   lr: 1e-4 
   loss_alphas:
@@ -15,17 +16,17 @@ model:
   weight_decay: 0.0001
   min_depth: 1e-3
   max_depth: 10
-  save_png_path: /root/zhshen/results
+
 data:
   data_name: nyu2
   train_data_path: /root/zhshen/datasets/nyu
   predict_data_path: /root/zhshen/datasets/my_SQUID
   numworkers: 0
-  batch_size: 8
+  batch_size: 4
   scale_size:
     - 448
     - 576
 logger:
   proj_name: isw_densedepth
-  version: v3
+  version: v4
   wandb_savedir: /root/zhshen/wandb
