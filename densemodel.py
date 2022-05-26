@@ -76,13 +76,24 @@ class Encoder(nn.Module):
 
     def forward(self, x, isw=False):
         features = [x]
+        w_arr = []
         for k, v in self.original_model.features._modules.items():
-            if isw and (k == "norm0" or k == "denseblock1" or k == "denseblock2"):
-                out = v(features[-1])
-                out, w = InstanceWhitening(out.shape[1])(out)
+            if isw:
+                if k == "norm0":
+                    out = features[-1]
+                    out, w = InstanceWhitening(out.shape[1])(out)
+                    w_arr.append(w)
+                elif k == "denseblock1" or k == "denseblock2":
+                    out = v(features[-1])
+                    out, w = InstanceWhitening(out.shape[1])(out)
+                    w_arr.append(w)
+                else:
+                    out = v(features[-1])
                 features.append(out)
             else:
                 features.append(v(features[-1]))
+        if isw:
+            return features, w_arr
         return features
 
 
