@@ -9,7 +9,7 @@ from densemodel import MyModel
 from evaluate import *
 from config import *
 from dataset import *
-
+import pytorch_lightning as pl
 
 cs = ConfigStore.instance()
 cs.store(name="config_s", node=DepthConfig)
@@ -18,6 +18,7 @@ cs.store(name="config_s", node=DepthConfig)
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def my_app(cfg: DepthConfig) -> None:
     # print(OmegaConf.to_yaml(cfg))
+    pl.seed_everything(42)
     wandb_logger = WandbLogger(
         project=cfg.logger.proj_name,
         log_model=True,
