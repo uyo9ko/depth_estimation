@@ -1,33 +1,30 @@
-defaults:
-  - _self_
 trainer:
   gpus: 1
   trainer_path: /root/zhshen/lightning_ckpt
   max_epochs: 20
-  auto_lr_find: False
+  auto_lr_find: false
   limit_train_batches: 0.3
 model:
-  lr: 1e-4 
+  lr: 0.0001
   loss_alphas:
-    - 1.0
-    - 0.0
-    - 1.0
-    - 0.0
+  - 1.0
+  - 0.0
+  - 1.0
+  - 0.0
   weight_decay: 0.0001
-  min_depth: 1e-3
+  min_depth: 0.001
   max_depth: 10
-
 data:
   data_name: nyu2
   train_data_path: /root/zhshen/datasets/nyu
   predict_data_path: /root/zhshen/datasets/my_SQUID
-  fda_trans: False
+  fda_trans: false
   numworkers: 0
   batch_size: 4
   scale_size:
-    - 448
-    - 576
+  - 448
+  - 576
 logger:
   proj_name: Dense_depth_baseline_0606
-  version: noibn_v2
+  version: ibn_v2
   wandb_savedir: /root/zhshen/wandb

@@ -64,8 +64,8 @@ def my_app(cfg: DepthConfig) -> None:
     # train
     trainer.fit(model, data)
 
-    predictions = trainer.predict(model, data, return_predictions=True)
-    metrics = display_metrics(predictions)
+    # predictions = trainer.predict(model, data, return_predictions=True)
+    # metrics = display_metrics(predictions)
     # metrics = display_uw_metrics(predictions)
     # wandb_logger.log_metrics(metrics)
 
