@@ -15,7 +15,7 @@ model:
   weight_decay: 0.0001
   min_depth: 1e-3
   max_depth: 120
-  ckpt_path: uy9ko/GLP_depth_decoder_finetune_contrast/model-Nyu_0.2_FDA_v2:v0"
+  ckpt_path: uy9ko/isw_densedepth/model-v5:v16
 
 data:
   data_name: SQUID
@@ -29,5 +29,5 @@ data:
     - 576
 logger:
   proj_name: Dense_depth_finetune_0521
-  version: no_trans_v1
+  version: isw_v1
   wandb_savedir: /content/drive/Shareddrives/szh/wandb
